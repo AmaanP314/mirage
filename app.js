@@ -1,44 +1,27 @@
 import { TalkingHead } from "talkinghead";
+import * as THREE from "three";
 
-// Utility: Convert Float32Array to WAV (16kHz mono)
 function float32ToWav(float32Array, sampleRate = 16000) {
   const buffer = new ArrayBuffer(44 + float32Array.length * 2);
   const view = new DataView(buffer);
-
-  // RIFF identifier
   writeString(view, 0, "RIFF");
-  // RIFF chunk length
   view.setUint32(4, 36 + float32Array.length * 2, true);
-  // WAVE identifier
   writeString(view, 8, "WAVE");
-  // fmt sub-chunk
   writeString(view, 12, "fmt ");
-  // fmt sub-chunk length
   view.setUint32(16, 16, true);
-  // sample format (1 is PCM)
   view.setUint16(20, 1, true);
-  // mono (1 channel)
   view.setUint16(22, 1, true);
-  // sample rate
   view.setUint32(24, sampleRate, true);
-  // byte rate (sampleRate * blockAlign)
   view.setUint32(28, sampleRate * 2, true);
-  // block align (2 bytes per sample)
   view.setUint16(32, 2, true);
-  // bits per sample
   view.setUint16(34, 16, true);
-  // data sub-chunk
   writeString(view, 36, "data");
-  // data sub-chunk length
   view.setUint32(40, float32Array.length * 2, true);
-
-  // write PCM samples
   let offset = 44;
   for (let i = 0; i < float32Array.length; i++, offset += 2) {
     const s = Math.max(-1, Math.min(1, float32Array[i]));
     view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
   }
-
   return new Blob([view], { type: "audio/wav" });
 }
 
@@ -54,27 +37,45 @@ class DigitalHuman {
       geminiKey: "",
       elevenLabsKey: "",
       deepgramKey: "",
-      voiceId: "21m00Tcm4TlvDq8ikWAM", // Default Rachel
+      voiceId: "21m00Tcm4TlvDq8ikWAM",
     };
 
-    // Modules
-    this.head = null; // TalkingHead
-    this.socket = null; // Backend WebSocket
-    this.vad = null; // Silero VAD
+    this.head = null;
+    this.socket = null;
+    this.vad = null;
     this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-    // State
-    this.state = "idle"; // idle, listening, thinking, speaking
+    this.state = "idle";
     this.shouldInterrupt = false;
 
-    // UI Elements
     this.ui = {
       container: document.getElementById("avatar-container"),
       badge: document.getElementById("status-badge"),
       statusText: document.getElementById("status-text"),
-      chatOverlay: document.getElementById("chat-overlay"),
-      micBar: document.getElementById("mic-level"),
+      chatHistory: document.getElementById("chat-history"),
+      visualizer: document.getElementById("visualizer"),
     };
+
+    this.initVisualizer();
+  }
+
+  initVisualizer() {
+    this.vizBars = [];
+    for (let i = 0; i < 20; i++) {
+      const bar = document.createElement("div");
+      bar.className = "viz-bar";
+      this.ui.visualizer.appendChild(bar);
+      this.vizBars.push(bar);
+    }
+  }
+
+  updateVisualizer(volume) {
+    const intensity = Math.min(1, volume * 5);
+    this.vizBars.forEach((bar, i) => {
+      const height = 4 + Math.random() * 40 * intensity;
+      bar.style.height = `${height}px`;
+      bar.style.opacity = 0.3 + intensity * 0.7;
+    });
   }
 
   async init(keys) {
@@ -82,15 +83,9 @@ class DigitalHuman {
     this.updateStatus("loading", "INITIALIZING...");
 
     try {
-      // 1. Setup Avatar
       await this.setupAvatar();
-
-      // 2. Setup VAD (and Mic)
       await this.setupVAD();
-
-      // 3. Connect Backend
       this.connectBackend();
-
       this.updateStatus("idle", "READY");
       console.log("System Initialized");
     } catch (error) {
@@ -102,17 +97,32 @@ class DigitalHuman {
   updateStatus(mode, text) {
     this.state = mode;
     this.ui.statusText.innerText = text;
-    this.ui.badge.className = `status-${mode}`;
+
+    this.ui.badge.className = `system-status status-${mode}`;
+
     if (mode === "listening") {
-      this.ui.micBar.style.backgroundColor = "#00ff00";
-    } else if (mode === "speaking") {
-      this.ui.micBar.style.backgroundColor = "#00ccff";
+      this.startVizLoop();
     } else {
-      this.ui.micBar.style.backgroundColor = "#555";
+      this.stopVizLoop();
     }
   }
 
-  // --- AVATAR ---
+  startVizLoop() {
+    if (this.vizInterval) clearInterval(this.vizInterval);
+    this.vizInterval = setInterval(() => {
+      if (this.state === "listening" || this.state === "speaking") {
+        this.updateVisualizer(Math.random() * 0.5);
+      } else {
+        this.updateVisualizer(0);
+      }
+    }, 50);
+  }
+
+  stopVizLoop() {
+    if (this.vizInterval) clearInterval(this.vizInterval);
+    this.updateVisualizer(0);
+  }
+
   async setupAvatar() {
     this.head = new TalkingHead(this.ui.container, {
       cameraView: "upper",
@@ -132,10 +142,9 @@ class DigitalHuman {
       lipsyncLang: "en",
     });
 
-    this.head.start(); // Start animation loop
+    this.head.start();
   }
 
-  // --- VAD & AUDIO INPUT ---
   async setupVAD() {
     this.vad = await vad.MicVAD.new({
       workletURL: "./assets/libs/vad.worklet.bundle.min.js",
@@ -145,7 +154,6 @@ class DigitalHuman {
       },
       onSpeechStart: () => {
         console.log("VAD: Speech Start");
-        // INTERRUPTION LOGIC
         if (this.state === "speaking" || this.state === "thinking") {
           this.interrupt();
         }
@@ -153,14 +161,13 @@ class DigitalHuman {
       },
       onSpeechEnd: async (audio) => {
         console.log("VAD: Speech End", audio.length);
-        // audio is Float32Array of the utterance
         if (this.state === "speaking") return;
 
         this.updateStatus("thinking", "PROCESSING...");
         await this.processUserAudio(audio);
       },
       onVADMisfire: () => {
-        console.log("VAD: Misfire (Noise)");
+        console.log("VAD: Misfire");
         this.updateStatus("idle", "READY");
       },
     });
@@ -168,12 +175,8 @@ class DigitalHuman {
     this.vad.start();
   }
 
-  // --- STT (Deepgram REST) ---
   async processUserAudio(float32Audio) {
-    // 1. Convert to WAV
     const wavBlob = float32ToWav(float32Audio);
-
-    // 2. Send to Deepgram
     try {
       const response = await fetch(
         "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true",
@@ -205,7 +208,6 @@ class DigitalHuman {
     }
   }
 
-  // --- BACKEND ---
   connectBackend() {
     this.socket = new WebSocket("ws://localhost:8000/ws/chat");
 
@@ -215,7 +217,7 @@ class DigitalHuman {
       const data = JSON.parse(event.data);
 
       if (data.type === "audio_response") {
-        this.showSubtitle("AI: " + data.text);
+        this.addMessage("ai", data.text);
         await this.speak(data.text);
       }
     };
@@ -224,20 +226,18 @@ class DigitalHuman {
   }
 
   sendToBrain(text) {
-    this.showSubtitle("User: " + text);
+    this.addMessage("user", text);
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.updateStatus("thinking", "THINKING...");
       this.socket.send(text);
     }
   }
 
-  // --- TTS & SPEAKING ---
   async speak(text) {
     this.state = "speaking";
     this.shouldInterrupt = false;
     this.updateStatus("speaking", "SPEAKING...");
 
-    // 1. Fetch Audio from ElevenLabs
     try {
       const response = await fetch(
         `https://api.elevenlabs.io/v1/text-to-speech/${this.config.voiceId}?optimize_streaming_latency=3`,
@@ -259,15 +259,12 @@ class DigitalHuman {
 
       const arrayBuffer = await response.arrayBuffer();
 
-      // Check interruption before decoding
       if (this.shouldInterrupt) {
-        console.log("Interrupted before playback");
         return;
       }
 
       const audioBuffer = await this.audioCtx.decodeAudioData(arrayBuffer);
 
-      // Prepare for Lipsync
       const words = text.split(" ");
       const durationMs = audioBuffer.duration * 1000;
       const avgWordDur = durationMs / words.length;
@@ -279,17 +276,12 @@ class DigitalHuman {
         wdurations: words.map(() => avgWordDur),
       };
 
-      // Play via TalkingHead
       return new Promise((resolve) => {
-        this.head.speakAudio(audioObj, { lipsyncLang: "en" }, (sub) => {
-          // Subtitle callback
-        });
+        this.head.speakAudio(audioObj, { lipsyncLang: "en" }, (sub) => {});
 
-        // Monitor for interruption during playback
         const interval = setInterval(() => {
           if (this.shouldInterrupt) {
             clearInterval(interval);
-            this.head.stopSpeaking(); // Stops current speech
             this.audioCtx.suspend().then(() => this.audioCtx.resume());
             resolve();
           }
@@ -298,7 +290,6 @@ class DigitalHuman {
         setTimeout(() => {
           clearInterval(interval);
           if (this.state === "speaking") {
-            // Only reset if not already interrupted/listening
             this.state = "idle";
             this.updateStatus("idle", "READY");
           }
@@ -312,35 +303,31 @@ class DigitalHuman {
   }
 
   interrupt() {
-    console.log("!!! INTERRUPTED !!!");
     this.shouldInterrupt = true;
-    this.state = "listening"; // Force state
-
-    // Stop Audio immediately
+    this.state = "listening";
     if (this.audioCtx.state === "running") {
       this.audioCtx.suspend().then(() => this.audioCtx.resume());
     }
-
-    // Stop Avatar Animation (Reset to neutral)
-    // force a short silent speak or just reset
-    if (this.head) {
-      // this.head.stop(); // Stops the loop
-      // this.head.start(); // Restart loop
-    }
   }
 
-  // --- UI HELPER ---
-  showSubtitle(text) {
-    this.ui.chatOverlay.classList.remove("hidden");
-    this.ui.chatOverlay.innerText = text;
-    setTimeout(() => this.ui.chatOverlay.classList.add("hidden"), 5000);
+  addMessage(role, text) {
+    const msgDiv = document.createElement("div");
+    msgDiv.className = `message ${role}`;
+
+    const label = document.createElement("span");
+    label.className = "message-label";
+    label.innerText = role === "user" ? "YOU" : "MIRAGE";
+
+    msgDiv.appendChild(label);
+    msgDiv.appendChild(document.createTextNode(text));
+
+    this.ui.chatHistory.appendChild(msgDiv);
+    this.ui.chatHistory.scrollTop = this.ui.chatHistory.scrollHeight;
   }
 }
 
-// Global Instance
 let digitalHuman;
 
-// --- INITIALIZATION ---
 document.getElementById("start-btn").addEventListener("click", () => {
   const keys = {
     geminiKey: document.getElementById("gemini-key").value,
@@ -357,8 +344,4 @@ document.getElementById("start-btn").addEventListener("click", () => {
 
   digitalHuman = new DigitalHuman();
   digitalHuman.init(keys);
-});
-
-document.addEventListener("DOMContentLoaded", () => {
-  // Check local storage for keys
 });
