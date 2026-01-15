@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Project Mirage | Digital Human</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+          "talkinghead": "https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.1/modules/talkinghead.mjs",
+          "@deepgram/sdk": "https://cdn.jsdelivr.net/npm/@deepgram/sdk/+esm"
+        }
+      }
+    </script>
+
+    <!-- Local Dependencies (UMD/Global) -->
+    <script src="./assets/libs/ort.min.js"></script>
+    <script src="./assets/libs/vad.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <!-- Configuration Modal -->
+    <div id="config-modal" class="modal">
+      <div class="modal-content">
+        <h2>System Configuration</h2>
+        <div class="input-group">
+          <label for="gemini-key">GEMINI API KEY</label>
+          <input type="password" id="gemini-key" placeholder="AI Studio Key" />
+        </div>
+        <div class="input-group">
+          <label for="elevenlabs-key">ELEVENLABS API KEY</label>
+          <input type="password" id="elevenlabs-key" placeholder="xi-..." />
+        </div>
+        <div class="input-group">
+          <label for="deepgram-key">DEEPGRAM API KEY</label>
+          <input type="password" id="deepgram-key" placeholder="Token" />
+        </div>
+        <button id="start-btn">INITIALIZE SYSTEM</button>
+      </div>
+    </div>
+
+    <!-- Main Interface -->
+    <main class="container">
+      <!-- User View (Mirror) -->
+      <section class="user-view">
+        <video id="user-video" autoplay muted playsinline></video>
+        <div class="overlay-stats">
+          <div class="stat-item">
+            <span class="label">MIC INPUT</span>
+            <div class="bar-container">
+              <div id="mic-level" class="bar"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Avatar View -->
+      <section class="avatar-view">
+        <div id="avatar-container"></div>
+
+        <!-- Dynamic Status Badge -->
+        <div id="status-badge" class="status-stopped">
+          <span class="status-dot"></span>
+          <span id="status-text">OFFLINE</span>
+        </div>
+
+        <!-- Subtitles / Chat Overlay -->
+        <div id="chat-overlay" class="hidden"></div>
+
+        <!-- Debug Test Button -->
+        <button
+          id="test-tts-btn"
+          style="
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+            padding: 10px;
+            background: red;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+          "
+        >
+          TEST AUDIO & ANIMATION
+        </button>
+      </section>
+    </main>
+
+    <!-- Application Logic -->
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

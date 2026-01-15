@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+langchain
+langchain-core
+langchain-google-genai
+python-dotenv
+websockets
